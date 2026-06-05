@@ -1,0 +1,41 @@
+# Active config. Paper-sim = live Binance mainnet prices + simulated fills,
+# virtual money, NO keys, NO real-money risk. Safe to run unattended.
+# (Switch to live only after a strategy passes the go/no-go gate.)
+
+mode: paper
+paper_execution: sim          # sim = no keys, virtual money (forward test)
+confirm_live: false           # real-money gate (keep false until a gate pass)
+
+symbols: ["BTC/USDT"]
+timeframe: "4h"
+htf_timeframe: "1d"
+quote_currency: "USDT"
+initial_equity: 1000.0        # VIRTUAL paper equity (clean 1% sizing); adjust freely
+
+testnet_url: "https://testnet.binance.vision"
+
+strategy:
+  name: breakout              # the only candidate with a real out-of-sample edge
+  params:
+    entry_length: 20
+    exit_length: 10
+    stop_atr_mult: 2.0
+    require_vol_expansion: true
+
+risk:
+  risk_fraction_per_trade: 0.01
+  risk_hard_cap_per_trade: 0.02
+  require_stop: true
+  stop_atr_mult: 1.5
+  tp_mode: atr
+  trail_mode: atr
+  daily_loss_limit_pct: 0.03
+  max_drawdown_pct: 0.15
+  kill_switch_auto_resume: false
+  max_concurrent_positions: 1
+  spot_only: true
+  max_leverage: 1.0
+  taker_fee_pct: 0.001
+  slippage_pct: 0.0005
+  stop_slippage_pct: 0.0020
+  min_rr_after_costs: 1.0

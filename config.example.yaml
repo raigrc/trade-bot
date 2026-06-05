@@ -1,0 +1,71 @@
+# Copy to config.yaml and edit. Defaults below mirror tradebot/config.py.
+
+mode: backtest            # backtest | paper | live
+confirm_live: false       # MUST be true to start `live` mode (real-money gate)
+paper_execution: sim      # sim = live mainnet prices + simulated fills, NO keys (forward test)
+                          # testnet = real orders on Binance testnet (needs testnet keys)
+
+symbols: ["BTC/USDT"]
+timeframe: "4h"
+htf_timeframe: "1d"       # higher-timeframe trend filter
+quote_currency: "USDT"
+initial_equity: 10000.0   # backtest starting equity
+
+backtest_start: "2021-01-01"
+backtest_end: null
+
+# ccxt's sandbox URL has drifted historically (issue #27266). If the testnet
+# self-test reports auth failures, try "https://demo-api.binance.com".
+testnet_url: "https://testnet.binance.vision"
+
+strategy:
+  name: trend             # trend | mean_reversion | breakout | regime_router
+  params:
+    ema_fast: 20
+    ema_slow: 50
+    htf_ema: 200
+    adx_period: 14
+    adx_min: 25
+
+risk:
+  # 1. position sizing
+  risk_fraction_per_trade: 0.01
+  risk_hard_cap_per_trade: 0.02
+  allow_min_notional_override: false
+  # 2. stops (mandatory)
+  require_stop: true
+  min_stop_dist_pct: 0.001
+  max_stop_dist_pct: 0.25
+  stop_limit_offset_pct: 0.005
+  # 3. take-profit / trailing
+  tp_mode: atr
+  atr_period: 14
+  stop_atr_mult: 1.5
+  tp_atr_mult: 3.0
+  trail_mode: atr
+  trail_atr_mult: 2.5
+  trail_activation_pct: 0.01
+  # 4. daily loss limit
+  daily_loss_limit_pct: 0.03
+  # 5. max drawdown kill-switch
+  max_drawdown_pct: 0.15
+  kill_switch_auto_resume: false
+  # 6. exposure caps
+  max_concurrent_positions: 1
+  max_total_exposure_pct: 0.50
+  max_per_symbol_exposure_pct: 0.20
+  max_group_exposure_pct: 0.30
+  correlation_groups:
+    majors: ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]
+  # 7. cooldown
+  loss_streak_threshold: 3
+  cooldown_minutes: 240
+  reentry_cooldown_minutes: 30
+  # 8. leverage
+  spot_only: true
+  max_leverage: 1.0
+  # 9. fees & slippage
+  taker_fee_pct: 0.001
+  slippage_pct: 0.0005
+  stop_slippage_pct: 0.0020
+  min_rr_after_costs: 1.0

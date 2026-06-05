@@ -1,0 +1,35 @@
+# secrets — NEVER commit real keys
+.env
+*.key
+*.pem
+
+# data, state, logs & reports (runtime artifacts)
+data/
+state/
+logs/
+reports/
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
