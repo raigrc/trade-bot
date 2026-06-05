@@ -126,8 +126,11 @@ def walk_forward(
     wfe_ratios: list[float] = []
 
     for (trs, tre, tes, tee) in windows:
-        # optimise on the train window
-        best, best_score, best_train = {}, -float("inf"), None
+        # optimise on the train window. Default to the first combo (not {}) so a
+        # single-combo grid (a fixed variant) is always used even if a train
+        # window is below min_trades — otherwise it would silently fall back to
+        # the strategy defaults and contaminate an A/B comparison.
+        best, best_score, best_train = combos[0], -float("inf"), None
         for combo in combos:
             r = run_backtest(config, symbol, strategy_name, params=combo, start_ms=trs, end_ms=tre)
             score = getattr(r.metrics, objective) if r.metrics.n_trades >= min_trades else -float("inf")

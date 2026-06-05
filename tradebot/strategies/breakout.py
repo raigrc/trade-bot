@@ -35,6 +35,13 @@ class BreakoutStrategy(Strategy):
         "tp_atr_mult": 0.0,  # 0 => no fixed target, ride the trailing stop
         "require_vol_expansion": True,
         "warmup_bars": 210,
+        # --- optional false-breakout filters (default OFF = classic Donchian) ---
+        "volume_mult": 0.0,   # >0: require breakout volume > mult * SMA(volume, vol_period)
+        "vol_period": 20,
+        "adx_min": 0.0,       # >0: require ADX(adx_period) >= adx_min (real trend, not a range poke)
+        "adx_period": 14,
+        "htf_slope": False,   # require the daily EMA to be RISING, not just price above a flat EMA
+        "htf_slope_lookback": 10,
     }
 
     def on_bar(self, ctx: StrategyContext) -> Optional[Signal]:
@@ -70,9 +77,24 @@ class BreakoutStrategy(Strategy):
         htf = ctx.htf_window
         if len(htf) < p["htf_ema"]:
             return None
-        htf_ema_val = ind.ema(htf["close"], p["htf_ema"]).iloc[-1]
+        htf_ema = ind.ema(htf["close"], p["htf_ema"])
+        htf_ema_val = htf_ema.iloc[-1]
         if _nan(htf_ema_val) or price <= htf_ema_val:
             return None
+
+        # ---- optional false-breakout filters --------------------------------
+        if p.get("htf_slope"):  # daily trend must be rising, not flat
+            lb = p["htf_slope_lookback"]
+            if len(htf_ema) <= lb or _nan(htf_ema.iloc[-1 - lb]) or htf_ema.iloc[-1] <= htf_ema.iloc[-1 - lb]:
+                return None
+        if p.get("volume_mult", 0.0) > 0:  # breakout needs participation
+            vol_sma = ind.sma(w["volume"], p["vol_period"]).iloc[-1]
+            if _nan(vol_sma) or vol_sma <= 0 or ctx.bar.volume <= p["volume_mult"] * vol_sma:
+                return None
+        if p.get("adx_min", 0.0) > 0:  # only break out of a real trend, not a range
+            adx_val = ind.adx(high, low, close, p["adx_period"]).iloc[-1]
+            if _nan(adx_val) or adx_val < p["adx_min"]:
+                return None
 
         stop = price - p["stop_atr_mult"] * atr_val
         target = price + p["tp_atr_mult"] * atr_val if p["tp_atr_mult"] > 0 else None
