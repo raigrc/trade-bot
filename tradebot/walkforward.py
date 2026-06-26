@@ -32,6 +32,10 @@ DEFAULT_GRIDS: dict[str, dict[str, list]] = {
     "mean_reversion": {"rsi_oversold": [25, 30], "bb_std": [2.0, 2.5], "adx_max": [20, 25]},
     "breakout": {"entry_length": [20, 40], "exit_length": [10, 20], "stop_atr_mult": [2.0, 3.0]},
     "regime_router": {},
+    # Pre-registered TSMom grid — deliberately small (<=6 combos) to avoid the
+    # multiple-testing trap. lookback in days (converted to 4h bars in-strategy);
+    # one optional regime gate (daily close > daily SMA-200).
+    "tsmom": {"lookback_days": [14, 21, 28], "require_htf_uptrend": [False, True]},
 }
 
 

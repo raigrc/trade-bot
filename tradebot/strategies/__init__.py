@@ -13,12 +13,14 @@ def build_strategy(name: str, symbol: str, timeframe: str, params: dict | None =
     from .mean_reversion import MeanReversionStrategy
     from .regime import RegimeRouter
     from .trend import TrendStrategy
+    from .tsmom import TSMomStrategy
 
     registry: dict[str, type[Strategy]] = {
         "trend": TrendStrategy,
         "mean_reversion": MeanReversionStrategy,
         "breakout": BreakoutStrategy,
         "regime_router": RegimeRouter,
+        "tsmom": TSMomStrategy,
     }
     try:
         cls = registry[name]
