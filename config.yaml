@@ -1,26 +1,27 @@
 # Active config. Paper-sim = live Binance mainnet prices + simulated fills,
 # virtual money, NO keys, NO real-money risk. Safe to run unattended.
-# (Switch to live only after a strategy passes the go/no-go gate.)
+# Currently FORWARD PAPER-TESTING tsmom on daily bars: walk-forward is NO-GO but
+# it's the most promising candidate (cross-regime, survives 2x costs; see
+# docs/strategy_gate_results.md). Stays in PAPER — confirm_live remains false
+# until a strategy actually PASSES the go/no-go gate.
 
 mode: paper
 paper_execution: sim          # sim = no keys, virtual money (forward test)
 confirm_live: false           # real-money gate (keep false until a gate pass)
 
 symbols: ["BTC/USDT"]
-timeframe: "4h"
-htf_timeframe: "1d"
+timeframe: "1d"               # daily signal bars (forward-testing daily TSMom)
+htf_timeframe: "1d"           # daily 200-SMA regime gate (== trading tf for daily)
 quote_currency: "USDT"
 initial_equity: 1000.0        # VIRTUAL paper equity (clean 1% sizing); adjust freely
 
 testnet_url: "https://testnet.binance.vision"
 
 strategy:
-  name: breakout              # the only candidate with a real out-of-sample edge
+  name: tsmom                 # forward paper-test — see docs/strategy_gate_results.md
   params:
-    entry_length: 20
-    exit_length: 10
-    stop_atr_mult: 2.0
-    require_vol_expansion: true
+    lookback_days: 28         # go long when trailing 28d return > 0
+    require_htf_uptrend: true # only long when daily close > daily SMA-200 (sat out 2022 bear)
 
 risk:
   risk_fraction_per_trade: 0.01

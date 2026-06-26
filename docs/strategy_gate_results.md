@@ -64,17 +64,55 @@ The capital-preserving decision (per `README.md`) is unambiguous: **do not go li
 Keep paper-running to learn; only revisit with a genuinely novel, independently-motivated
 hypothesis — never by tuning configs until one "passes" (textbook overfitting).
 
-## Meta-lesson and the one remaining cheap experiment
+## Daily-bar follow-up (2026-06-27) — promising, but still a walk-forward NO-GO
 
-The clear signal: **pure price/TA on 4h majors is exhausted.** Walk-forward efficiency
-near zero everywhere says the timeframe + data + signal family has no generalizable edge.
+The 4h pure-price/TA space is exhausted. The teed-up cheap experiment was then run:
+`tsmom` and `trend` on **daily (1d)** bars (regime gate = daily close vs daily SMA-200;
+same 540/180-day walk-forward windows). Dropping from 4h to daily cut the cost/whipsaw
+drag exactly as predicted — and for the first time a config showed **positive expectancy
+with profit factor > 1.3**.
 
-The single most defensible next experiment (no new data, no new code — a config change):
-run `tsmom`/`trend` on **daily (1d) bars** instead of 4h. Rationale: the 4h TSMom died
-from cost-drag at 403 trades; on daily bars the same 28-day signal fires ~10–15×/year, so
-cost drag drops from dominating to marginal — and the weekly/daily horizon is the
-granularity the academic momentum evidence actually documents. **Honest prior: 15–20%**
-to clear the gate (most likely failure: < 100 OOS trades over 2020→2026, or the 2022 bear
-collapsing Calmar). If the daily version also fails, the evidence has converged: stop
-testing this instrument/data at this complexity, keep paper-running the least-bad
-strategy, and do not go live.
+### Honest walk-forward (the real gate)
+| Strategy | Symbol | OOS return | PF | Calmar | Sortino | Trades | Expectancy | Gate |
+|---|---|--:|--:|--:|--:|--:|--:|:--|
+| tsmom | BTC | +13.71% | 1.58 | 0.44 | 0.67 | 92 | +0.70% | NO-GO (Calmar/Sortino/trades) |
+| tsmom | ETH | +6.32% | 1.13 | 0.13 | 0.32 | 109 | +0.51% | NO-GO |
+| trend | BTC | +2.75% | 2.77 | 0.26 | 0.20 | 6 | +5.5% | NO-GO (6 trades) |
+| trend | ETH | +0.46% | 1.12 | 0.02 | 0.03 | 9 | +0.46% | NO-GO (9 trades) |
+
+Daily-TSMom/BTC **narrowly** misses on Calmar (0.44 vs 0.5), Sortino (0.67 vs 1.0), and
+trade count (92 vs 100). It is a NO-GO — but a near-miss, unlike everything before it.
+
+### Adversarial diagnostics — does it fail the way breakout did?
+Breakout died two ways: regime-concentrated (one 2023-24 window) and cost-fragile
+(collapsed under 2× costs). Daily-TSMom fails NEITHER. Fixed robust params (lookback=28d +
+200d regime gate), full-history backtest (**IN-SAMPLE — optimistic, NOT the gate
+estimate**), P&L by regime and under 2× costs:
+
+| | BTC 1× | BTC 2× | ETH 1× | ETH 2× |
+|---|--:|--:|--:|--:|
+| Return | +35.4% | +28.4% | +16.2% | +12.2% |
+| Profit factor | 2.53 | **2.20** | 1.53 | **1.40** |
+| Calmar | 0.91 | 0.66 | 0.39 | 0.27 |
+
+BTC regime breakdown: 2020-21 bull PF **3.54** · 2022 bear **0 trades (stayed out)** ·
+2023-24 recovery PF **3.87** · 2025-26 PF 0.76 (recent weakness). ETH: positive in every
+bull regime, survives 2× costs at PF 1.40.
+
+Unlike breakout, the edge is **not** concentrated in a single window (profitable across two
+distinct bull cycles), correctly sits out the 2022 bear, **survives 2× costs** (PF stays
+2.20/1.40), and shows the same sign on both majors. These are the fingerprints of a real —
+if modest — momentum premium, not curve-fit luck.
+
+### Verdict and the disciplined next step
+Honest gate: **still NO-GO — do not trade real money.** Yellow flags remain: the
+walk-forward gate misses, low walk-forward efficiency (params don't transfer cleanly OOS),
+recent 2025-26 softening, and borderline-thin trade counts.
+
+But this is the first genuine signal of life, and it does not fail breakout's failure
+modes. The capital-preserving way to pursue it is **not** to tune params until it squeaks
+past the gate (that is overfitting). It is to **forward paper-test `tsmom` on daily bars**
+— gather real, un-tortured out-of-sample evidence over the coming months at $0 risk. If it
+keeps its cross-regime, cost-robust behavior forward, that builds the case for testnet then
+tiny-live. If it decays, we learned cheaply. The in-sample +35% is the optimistic ceiling;
+the honest forward expectation is the +13.7% walk-forward figure or lower.

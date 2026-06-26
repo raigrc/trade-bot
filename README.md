@@ -84,7 +84,9 @@ Get-Content logs\paper.log -Tail 20      # recent runs
 
 ### Graduating to live (only when earned)
 1. A strategy must **PASS the go/no-go gate** in walk-forward: `python -m tradebot.walkforward --strategy <name>`.
-   (As of the last run, none does — `breakout`/BTC is closest but fails on Calmar/Sortino.)
+   (As of 2026-06-27, none does — daily `tsmom`/BTC is closest: positive expectancy, PF 1.58, and
+   survives 2× costs, but narrowly misses Calmar/Sortino/trade-count. It is being **forward
+   paper-tested** on daily bars; see `docs/strategy_gate_results.md`.)
 2. Run **paper** for several weeks; weekly reflections should stay consistent with backtest.
 3. Validate real order placement on **testnet**: add testnet keys to `.env`, set `paper_execution: testnet`.
 4. Go live with **tiny** capital you can lose entirely: set `mode: live` + `confirm_live: true` + add live keys
