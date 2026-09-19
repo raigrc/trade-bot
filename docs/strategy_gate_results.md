@@ -1,3 +1,34 @@
+## Session Update (2026-08-09)
+
+### What was done
+- Config fixed to timeframe: 1d (was 5m, reverted to match validated results)
+- Security review: 2 HIGH, 4 MEDIUM, 4 LOW findings
+- QA review: 7 HIGH, 6 MEDIUM findings
+- All HIGH issues fixed:
+  - Live keys separated to .env.live
+  - .env.local added to .gitignore
+  - Portfolio oversized sell fixed
+  - Zero-qty fill guarded
+  - Independent RiskState per symbol in multi backtest
+  - Engine.kill-switch integration tests added
+  - MultiEngine unit tests added
+- 101 tests pass, ruff clean
+
+### Current status
+- Paper-sim mode running on daily bars
+- Testnet validated (5/5 checks pass)
+- Bot runs hourly via scheduled task
+- TSMom stays flat (correct behavior — waiting for uptrend)
+- 0 trades so far on forward paper
+
+### What's next
+- Let paper accumulate ≥12 weeks evidence
+- Walk-forward on ETH/SOL (optional)
+- Testnet for ≥2 weeks
+- Gate must pass before live
+
+---
+
 # Strategy go/no-go sweep — findings (2026-06-26)
 
 **Question:** Does *any* strategy in the codebase — or the best-evidenced new
@@ -116,3 +147,37 @@ past the gate (that is overfitting). It is to **forward paper-test `tsmom` on da
 keeps its cross-regime, cost-robust behavior forward, that builds the case for testnet then
 tiny-live. If it decays, we learned cheaply. The in-sample +35% is the optimistic ceiling;
 the honest forward expectation is the +13.7% walk-forward figure or lower.
+
+## Infrastructure updates (2026-08-07)
+
+### Multi-symbol support added
+- Portfolio refactored for `positions: dict[str, Position]` — supports concurrent positions
+- `MultiEngine` orchestrator runs independent engines per symbol
+- `correlation.py` computes rolling pairwise correlation + sizing penalty
+- `RiskManager` integrates correlation penalty into position sizing
+- ETH/SOL historical data fetched (SOL: 2,187 daily bars from 2020-08-11)
+- `LiveRunner` supports multi-symbol mode with per-symbol state persistence
+
+### Alpha sources added
+- `tradebot/alpha/` package with 3 providers: funding rate, open interest, sentiment
+- TSMom uses alpha as confidence filters (skip on crowded longs / extreme greed)
+- Non-fatal: API failures default to no filter, bot trades without alpha data
+
+### Monitoring improvements
+- Telegram heartbeat (configurable interval, default 4h)
+- `/status` Telegram command for on-demand status
+- `scripts/paper_status.py` — one-page CLI dashboard
+- `scripts/equity_chart.py` — ASCII equity curve + drawdown
+- `scripts/validate_testnet.py` — testnet connectivity + order validation
+
+### Security hardening
+- `RiskState.load_state` uses explicit allowlist (no setattr injection)
+- `Portfolio.load_state` has type validation on position restore
+- `SimulatedExecution.load_state` has error handling for corrupted state
+- Dead exposure cap config removed (6 never-enforced fields)
+- Circuit breaker alerts after 5 consecutive exchange failures
+- Tenacity retry on data fetcher and Telegram notifier
+
+### Test coverage
+- 88 tests pass (up from 52), ruff clean
+- New: persistence, correlation, alpha, portfolio_multi test files

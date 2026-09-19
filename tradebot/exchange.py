@@ -88,11 +88,11 @@ class BinanceExchange:
         try:
             api = self._ex.urls.get("api")
             if isinstance(api, dict):
-                for key in ("public", "private", "rest"):
+                # Preserve the versioned paths (e.g., /api/v3) but replace the host
+                for key in ("public", "private", "v1"):
                     if key in api:
-                        api[key] = url + "/api"
-            else:
-                self._ex.urls["api"] = url + "/api"
+                        old_path = api[key].split("//", 1)[-1]  # get path after host
+                        api[key] = url + "/" + old_path.split("/", 1)[-1]  # replace host only
             log.info("Testnet REST host overridden to %s", url)
         except Exception as exc:  # pragma: no cover - defensive
             log.warning("Could not override testnet URL (%s); using ccxt default", exc)

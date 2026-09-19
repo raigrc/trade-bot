@@ -10,8 +10,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pandas as pd
-
 import tradebot
 from tradebot.data import ParquetFeed
 from tradebot.strategies.trend import TrendStrategy

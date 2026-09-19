@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import pytest
 
 from tradebot.config import RiskConfig
-from tradebot.enums import Side
-from tradebot.types import AccountState, MarketInfo, Position, timeframe_ms
+from tradebot.types import AccountState, MarketInfo, timeframe_ms
 
 
 @pytest.fixture

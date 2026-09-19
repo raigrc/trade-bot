@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from tradebot.enums import RejectCode, Side
-from tradebot.risk import RiskManager, RiskState
+from tradebot.risk import RiskManager
 from tradebot.types import AccountState, Approval, Position, Rejection, Signal
 
 

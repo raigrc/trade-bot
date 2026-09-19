@@ -16,11 +16,13 @@ Per-bar order of operations (``step``):
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Callable, Optional
 
 import pandas as pd
 
 from . import indicators as ind
+from .alpha import AlphaProvider, AlphaSnapshot
 from .clock import Clock, SimClock
 from .data import MarketSlice
 from .enums import Side
@@ -47,6 +49,7 @@ class Engine:
         on_trade: Optional[Callable[[Trade], None]] = None,
         on_alert: Optional[Callable[[str], None]] = None,
         on_equity: Optional[Callable[[int, float], None]] = None,
+        alpha_provider: Optional[AlphaProvider] = None,
     ) -> None:
         self.symbol = symbol
         self.clock = clock
@@ -58,6 +61,7 @@ class Engine:
         self._on_trade = on_trade
         self._on_alert = on_alert
         self._on_equity = on_equity
+        self._alpha_provider = alpha_provider
 
         self.halted = False
         self.equity_curve: list[tuple[int, float]] = []
@@ -105,6 +109,7 @@ class Engine:
         # 5. strategy (closed bar, after warmup)
         if len(slc.window) < self.strategy.warmup_bars:
             return
+        alpha = self._fetch_alpha(bar.symbol, now)
         ctx = StrategyContext(
             bar=bar,
             window=slc.window,
@@ -112,6 +117,7 @@ class Engine:
             position=self.portfolio.position,
             clock_ms=now,
             params=self.strategy.params,
+            alpha=alpha,
         )
         signal = self.strategy.on_bar(ctx)
         if signal is None:
@@ -183,3 +189,170 @@ class Engine:
         log.info(msg)
         if self._on_alert:
             self._on_alert(msg)
+
+    def _fetch_alpha(self, symbol: str, now_ms: int) -> Optional[AlphaSnapshot]:
+        """Fetch alpha snapshot; provider failures are non-fatal (returns None)."""
+        if self._alpha_provider is None:
+            return None
+        try:
+            return self._alpha_provider.fetch(symbol, now_ms)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Alpha fetch failed (non-fatal): %s", exc)
+            return None
+
+
+# --------------------------------------------------------------------------- #
+# MultiEngine — orchestrates multiple single-symbol engines
+# --------------------------------------------------------------------------- #
+class MultiEngine:
+    """Orchestrates multiple single-symbol engines for a portfolio.
+
+    Each sub-Engine runs independently with its own strategy, risk manager,
+    execution layer, and portfolio.  MultiEngine aggregates equity, bars
+    processed, halted status, and rejections across all symbols.
+
+    Callbacks:
+      * ``on_trade`` — forwarded as-is (``Trade`` already carries ``symbol``).
+      * ``on_alert`` — prefixed with ``[SYMBOL]`` so the origin is obvious.
+      * ``on_equity`` — reports *portfolio-level* equity (sum of all sub-engine
+        equity values), not per-engine.
+    """
+
+    def __init__(
+        self,
+        engines: dict[str, Engine],
+        *,
+        on_trade: Optional[Callable[[Trade], None]] = None,
+        on_alert: Optional[Callable[[str], None]] = None,
+        on_equity: Optional[Callable[[int, float], None]] = None,
+    ) -> None:
+        self.engines = engines  # keyed by symbol
+        self._on_trade = on_trade
+        self._on_alert = on_alert
+        self._on_equity = on_equity
+
+        self.halted = False
+        self.equity_curve: list[tuple[int, float]] = []
+        self.rejections: dict[str, int] = {}
+        self.bars_processed = 0
+
+        # Wire sub-engine callbacks so they route through MultiEngine logic.
+        for sym, engine in engines.items():
+            # on_trade: Trade already contains .symbol — forward as-is.
+            engine._on_trade = on_trade
+            # on_alert: prefix with [SYMBOL] so the source is unambiguous.
+            engine._on_alert = (
+                (lambda msg, s=sym: on_alert(f"[{s}] {msg}")) if on_alert else None
+            )
+            # on_equity: suppressed on sub-engines; aggregated at this level.
+            engine._on_equity = None
+
+    # -- main entry ------------------------------------------------------------
+    def run(self, feeds: dict[str, Iterable[MarketSlice]]) -> None:
+        """Run all feeds in lockstep, aligned by ``close_time_ms``.
+
+        Feeds that are shorter or longer than others are handled gracefully:
+        only symbols with a bar at the current timestamp are stepped.  The
+        loop ends when every feed is exhausted.
+        """
+        iters = {sym: iter(feed) for sym, feed in feeds.items()}
+        buffers: dict[str, MarketSlice] = {}
+
+        # Prime: pull the first bar from each feed.
+        for sym in list(iters):
+            try:
+                buffers[sym] = next(iters[sym])
+            except StopIteration:
+                del iters[sym]
+
+        while buffers:
+            # Earliest close time across all buffered bars.
+            earliest = min(b.bar.close_time_ms for b in buffers.values())
+
+            # Collect every symbol that has a bar at this timestamp.
+            batch: dict[str, MarketSlice] = {}
+            for sym in list(buffers):
+                if buffers[sym].bar.close_time_ms == earliest:
+                    batch[sym] = buffers.pop(sym)
+
+            # Advance the iterator for each consumed symbol.
+            for sym in batch:
+                if sym in iters:
+                    try:
+                        buffers[sym] = next(iters[sym])
+                    except StopIteration:
+                        del iters[sym]
+
+            self.step(batch)
+
+    def step(self, slices: dict[str, MarketSlice]) -> None:
+        """Process one bar for each symbol.
+
+        *slices* maps symbol → MarketSlice.  Symbols present in
+        ``self.engines`` but absent from *slices* (e.g. data gap) are
+        silently skipped for that tick.
+        """
+        if not slices:
+            return
+
+        for symbol, slc in slices.items():
+            if symbol in self.engines:
+                self.engines[symbol].step(slc)
+
+        # Aggregate portfolio-level equity across all engines that have a bar.
+        total_equity = sum(
+            e.portfolio.equity(slices[s].bar.close)
+            for s, e in self.engines.items()
+            if s in slices
+        )
+        now = max(slc.bar.close_time_ms for slc in slices.values())
+        self.equity_curve.append((now, total_equity))
+        if self._on_equity:
+            self._on_equity(now, total_equity)
+
+        # Aggregate counters.
+        self.bars_processed = sum(e.bars_processed for e in self.engines.values())
+        self.halted = any(e.halted for e in self.engines.values())
+
+        # Merge rejection codes from all sub-engines.
+        self.rejections = {}
+        for e in self.engines.values():
+            for code, count in e.rejections.items():
+                self.rejections[code] = self.rejections.get(code, 0) + count
+
+    # -- state persistence (aggregated from all sub-engines) -------------------
+    def state_dict(self) -> dict:
+        """Serialize state from every sub-engine, keyed by symbol."""
+        return {
+            "engines": {
+                sym: {
+                    "portfolio": e.portfolio.state_dict(),
+                    "risk": e.risk.state.state_dict(),
+                    "execution": e.execution.state_dict(),
+                    "strategy": e.strategy.state_dict(),
+                }
+                for sym, e in self.engines.items()
+            },
+            "bars_processed": self.bars_processed,
+            "halted": self.halted,
+        }
+
+    def load_state(self, d: dict) -> None:
+        """Restore state into each sub-engine from a ``state_dict`` snapshot."""
+        self.halted = d.get("halted", False)
+        self.bars_processed = d.get("bars_processed", 0)
+
+        engines_data = d.get("engines", {})
+        for sym, engine_state in engines_data.items():
+            if sym not in self.engines:
+                log.warning("load_state: unknown symbol %r, skipping", sym)
+                continue
+            e = self.engines[sym]
+            if "portfolio" in engine_state:
+                e.portfolio.load_state(engine_state["portfolio"])
+            if "risk" in engine_state:
+                e.risk.state.load_state(engine_state["risk"])
+            if "execution" in engine_state:
+                e.execution.load_state(engine_state["execution"])
+            if "strategy" in engine_state:
+                e.strategy.load_state(engine_state["strategy"])

@@ -34,7 +34,7 @@ def main() -> int:
     if config.mode == Mode.BACKTEST:
         config.mode = Mode.PAPER
 
-    secrets = load_secrets()
+    secrets = load_secrets(config.mode)
     key, _ = secrets.keys_for(config.mode)
     if not key:
         which = "BINANCE_API_KEY" if config.mode == Mode.LIVE else "BINANCE_TESTNET_API_KEY"

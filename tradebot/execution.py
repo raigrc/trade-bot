@@ -97,18 +97,26 @@ class SimulatedExecution:
                 "stop_order_id": None, "pending_entry": pe, "pending_exit": self._pending_exit}
 
     def load_state(self, d: dict) -> None:
-        self._open_qty = d.get("open_qty", 0.0)
+        self._open_qty = float(d.get("open_qty", 0.0))
         self._stop = d.get("stop")
         self._target = d.get("target")
         self._pending_exit = d.get("pending_exit")
         pe = d.get("pending_entry")
-        if pe:
-            o = pe["order"]
-            order = Order(symbol=o["symbol"], side=Side(o["side"]), qty=o["qty"],
-                          order_type=OrderType(o["order_type"]), limit_price=o.get("limit_price"),
-                          stop_price=o.get("stop_price"), reduce_only=o.get("reduce_only", False),
-                          client_order_id=o.get("client_order_id", ""))
-            self._pending_entry = (order, pe["stop"], pe["target"], pe["reason"])
+        if pe and isinstance(pe, dict):
+            try:
+                o = pe["order"]
+                order = Order(
+                    symbol=str(o["symbol"]), side=Side(o["side"]), qty=float(o["qty"]),
+                    order_type=OrderType(o["order_type"]),
+                    limit_price=o.get("limit_price"),
+                    stop_price=o.get("stop_price"),
+                    reduce_only=bool(o.get("reduce_only", False)),
+                    client_order_id=str(o.get("client_order_id", "")),
+                )
+                self._pending_entry = (order, float(pe["stop"]), pe.get("target"), str(pe["reason"]))
+            except (KeyError, ValueError, TypeError) as exc:
+                log.warning("Corrupted pending entry state, discarding: %s", exc)
+                self._pending_entry = None
         else:
             self._pending_entry = None
 
@@ -285,7 +293,12 @@ class CcxtExecution:
         }
 
     def load_state(self, d: dict) -> None:
-        self.adopt(d.get("open_qty", 0.0), d.get("stop"), d.get("target"), d.get("stop_order_id"))
+        self.adopt(
+            float(d.get("open_qty", 0.0)),
+            d.get("stop"),
+            d.get("target"),
+            d.get("stop_order_id"),
+        )
 
     # -- helpers ---------------------------------------------------------------
     def _place_native_stop(self, symbol: str, stop: float) -> None:
@@ -331,6 +344,9 @@ class CcxtExecution:
 
     def _fill_from(self, resp: dict, symbol: str, side: Side, bar: Bar) -> Fill:
         filled = float(resp.get("filled") or resp.get("amount") or 0.0)
+        if filled <= 0:
+            log.warning("Zero-qty fill rejected from exchange resp: %s", resp)
+            filled = 0.0
         avg = float(resp.get("average") or resp.get("price") or bar.close)
         fee_info = resp.get("fee") or {}
         if fee_info and fee_info.get("cost") is not None:

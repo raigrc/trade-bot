@@ -25,11 +25,17 @@ class Notifier:
             return
         try:
             import httpx
+            from tenacity import retry, stop_after_attempt, wait_exponential
 
-            httpx.post(
-                f"https://api.telegram.org/bot{self._token}/sendMessage",
-                json={"chat_id": self._chat, "text": f"🤖 {message}"},
-                timeout=10.0,
-            )
+            @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+            def _send() -> None:
+                resp = httpx.post(
+                    f"https://api.telegram.org/bot{self._token}/sendMessage",
+                    json={"chat_id": self._chat, "text": f"🤖 {message}"},
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+
+            _send()
         except Exception as exc:  # noqa: BLE001 — alerts must never crash the bot
-            log.warning("Telegram send failed: %s", exc)
+            log.warning("Telegram send failed (after retries): %s", exc)

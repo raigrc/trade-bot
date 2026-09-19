@@ -75,13 +75,7 @@ class RiskConfig(BaseModel):
 
     # 6. exposure caps
     max_concurrent_positions: int = 1
-    max_total_exposure_pct: float = 0.50
-    max_per_symbol_exposure_pct: float = 0.20
-    max_group_exposure_pct: float = 0.30
-    correlation_haircut: float = 0.8
-    correlation_groups: dict[str, list[str]] = Field(
-        default_factory=lambda: {"majors": ["BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT"]}
-    )
+    data_dir: str = "data"  # parquet directory for correlation data
 
     # 7. cooldown / loss-streak breaker
     loss_streak_threshold: int = 3
@@ -133,6 +127,8 @@ class BotConfig(BaseModel):
     # (issue #27266); override here if the self-test reports auth failures.
     testnet_url: str = "https://testnet.binance.vision"
 
+    heartbeat_hours: int = 4  # periodic Telegram heartbeat; 0 = disabled
+
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
 
@@ -153,5 +149,12 @@ def load_config(path: str | Path = "config.yaml") -> BotConfig:
     return BotConfig.model_validate(data)
 
 
-def load_secrets() -> Secrets:
+def load_secrets(mode: Mode | None = None) -> Secrets:
+    """Load API keys from env files.
+
+    * ``mode != LIVE`` — reads ``.env`` (testnet keys + telegram creds).
+    * ``mode == LIVE`` — reads ``.env.live`` (live keys + telegram creds).
+    """
+    if mode == Mode.LIVE:
+        return Secrets(_env_file=".env.live")
     return Secrets()

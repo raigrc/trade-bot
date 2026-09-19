@@ -24,6 +24,12 @@ from typing import Iterator, Optional, Protocol
 import ccxt
 import numpy as np
 import pandas as pd
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .types import Bar, timeframe_ms
 
@@ -108,6 +114,13 @@ class DataFeed(Protocol):
 class HistoricalDataFetcher:
     """Download real Binance mainnet OHLCV (public) and cache to parquet."""
 
+    _RETRYABLE = (
+        ccxt.NetworkError,
+        ccxt.DDoSProtection,
+        ccxt.RequestTimeout,
+        ccxt.ExchangeNotAvailable,
+    )
+
     def __init__(self, data_dir: str | Path = "data") -> None:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -116,6 +129,13 @@ class HistoricalDataFetcher:
     def cache_path(self, symbol: str, timeframe: str) -> Path:
         return self.data_dir / f"{symbol.replace('/', '_')}_{timeframe}.parquet"
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=1, max=30),
+        retry=retry_if_exception_type((ccxt.NetworkError, ccxt.DDoSProtection,
+                                       ccxt.RequestTimeout, ccxt.ExchangeNotAvailable)),
+    )
     def fetch_range(
         self, symbol: str, timeframe: str, since_ms: int, until_ms: Optional[int] = None
     ) -> pd.DataFrame:

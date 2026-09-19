@@ -16,6 +16,7 @@ from typing import Any, Mapping, Optional
 
 import pandas as pd
 
+from ..alpha import AlphaSnapshot
 from ..types import Bar, Position, Signal
 
 
@@ -27,6 +28,7 @@ class StrategyContext:
     position: Optional[Position]  # current position (read-only view)
     clock_ms: int  # == bar.close_time_ms in backtest AND live
     params: Mapping[str, Any]
+    alpha: Optional[AlphaSnapshot] = None  # advisory micro-structure signals
 
 
 class Strategy(ABC):

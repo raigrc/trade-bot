@@ -40,10 +40,10 @@ live" divergence. See `tradebot/engine.py` (one shared `Engine.step`),
 pip install -e ".[dev]"
 
 # 2. fetch historical data for backtests (one-time, ~1 min)
-python -m scripts.fetch_data --symbols BTC/USDT ETH/USDT --timeframes 4h 1d --start 2020-01-01
+python -m scripts.fetch_data --symbols BTC/USDT ETH/USDT SOL/USDT --timeframes 4h 1d --start 2020-01-01
 
 # 3. START — paper-sim needs NO keys, NO account, NO real money:
-python -m tradebot.main --once          # one cycle now (uses config.yaml: paper-sim, breakout)
+python -m tradebot.main --once          # one cycle now (uses config.yaml: paper-sim, tsmom)
 python -m tradebot.main                 # run continuously (Ctrl-C to stop)
 ```
 
@@ -64,11 +64,14 @@ Register-ScheduledTask -TaskName "TradeBot-Paper-BTCUSDT" -Action $a -Trigger $t
 
 ### Monitor / operate
 ```powershell
-python -m tradebot.admin status          # equity, drawdown, kill-switch, open position, last bar
-python -m tradebot.report                # this week's reflection
-python -m tradebot.report --logbook      # full trade logbook
+python -m scripts.paper_status         # one-page status dashboard
+python -m scripts.equity_chart         # ASCII equity curve + drawdown chart
+python -m scripts.validate_testnet     # validate testnet connectivity + order plumbing
+python -m tradebot.admin status        # equity, drawdown, kill-switch, open position, last bar
+python -m tradebot.report              # this week's reflection
+python -m tradebot.report --logbook    # full trade logbook
 python -m tradebot.admin clear-kill-switch   # re-arm after a 15% drawdown halt (manual, deliberate)
-Get-Content logs\paper.log -Tail 20      # recent runs
+Get-Content logs\paper.log -Tail 20    # recent runs
 ```
 
 ## Workflow
@@ -109,12 +112,39 @@ The reflection is rule-based (no LLM): weekly P&L / win rate / profit factor, eq
 drawdown, largest single-trade loss vs the 2% hard cap, drawdown vs the 15% kill-switch, loss streaks,
 and a plain-language capital-preservation summary.
 
+## Multi-symbol support
+
+The bot supports trading multiple symbols simultaneously (BTC, ETH, SOL) with correlation-aware
+position sizing. When multiple symbols are configured, each gets its own strategy, risk manager,
+execution engine, and portfolio — orchestrated by `MultiEngine`.
+
+```yaml
+# config.yaml — multi-symbol mode
+symbols: ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+risk:
+  max_concurrent_positions: 3
+```
+
+Correlation between symbols is computed from historical returns. When entering a position correlated
+with an existing one, position size is scaled down proportionally (via `tradebot/correlation.py`).
+
+## Alpha sources
+
+TSMom can optionally use supplementary signal sources as confidence filters:
+
+- **Funding rate** (`tradebot/alpha/funding_rate.py`) — high positive funding = crowded longs → skip entry
+- **Open interest** (`tradebot/alpha/open_interest.py`) — rapid OI expansion = potential distribution → reduce confidence
+- **Sentiment** (`tradebot/alpha/sentiment.py`) — extreme greed (>75) = contrarian caution → skip entry
+
+Alpha sources are non-fatal: if the API is down, the bot trades without the filter.
+
 ## Risk controls (capital-preservation defaults)
 
 Mandatory stop on every entry · 1% equity risk per trade (sized off stop
 distance) · 3% daily-loss brake · 15% max-drawdown kill-switch (manual re-arm) ·
-1 concurrent position · spot-only / no leverage · fees + slippage modelled from
-the first backtest. Tunable in `config.yaml` → `risk:`.
+1 concurrent position (up to 3 in multi-symbol mode) · spot-only / no leverage ·
+correlation-aware sizing · fees + slippage modelled from the first backtest.
+Tunable in `config.yaml` → `risk:`.
 
 ## Layout
 
@@ -123,11 +153,42 @@ tradebot/
   config.py exchange.py data.py indicators.py     # plumbing
   clock.py types.py enums.py                       # core seams & types
   strategies/  risk.py portfolio.py execution.py   # trading logic (mode-agnostic)
-  engine.py                                        # the ONE shared loop
+  engine.py                                        # the ONE shared loop + MultiEngine
   backtest.py metrics.py walkforward.py            # honest evaluation
   live.py persistence.py journal.py notify.py      # live runner + state + alerts
+  correlation.py                                   # pairwise correlation + sizing penalty
+  alpha/                                           # supplementary signal sources
+    __init__.py       # AlphaProvider protocol + AlphaSnapshot
+    funding_rate.py   # Binance perpetual funding rate
+    open_interest.py  # OI delta over 24h
+    sentiment.py      # Fear & Greed Index
+    composite.py      # merges all providers
   main.py
-scripts/   tests/   data/ state/ logs/ (gitignored)
+scripts/
+  paper_status.py        # one-page status dashboard
+  equity_chart.py        # ASCII equity curve + drawdown
+  validate_testnet.py    # testnet connectivity + order validation
+  fetch_data.py          # download historical OHLCV
+  optimize_breakout.py   # parameter sweep (historical)
+  check_connectivity.py  # basic exchange check
+  run_paper.ps1          # Windows scheduled task wrapper
+tests/   data/ state/ logs/ reports/ (gitignored)
 ```
+
+## Key commands reference
+
+| Command | What it does |
+|---|---|
+| `python -m tradebot.main` | Run bot (mode from config.yaml) |
+| `python -m tradebot.main --once` | Single cycle, then exit |
+| `python -m tradebot.main --mode backtest` | Run backtest |
+| `python -m scripts.paper_status` | Show current paper/live status |
+| `python -m scripts.equity_chart` | ASCII equity curve |
+| `python -m scripts.validate_testnet` | Validate testnet setup |
+| `python -m tradebot.admin status` | Inspect live state |
+| `python -m tradebot.admin clear-kill-switch` | Re-arm after halt |
+| `python -m tradebot.report` | Weekly reflection |
+| `python -m tradebot.report --logbook` | Full trade logbook |
+| `python -m tradebot.walkforward --strategy tsmom` | Walk-forward evaluation |
 
 **Not financial advice.** This is software for education and experimentation.

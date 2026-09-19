@@ -21,6 +21,7 @@ from typing import Optional
 
 from .clock import utc_day_start_ms
 from .config import RiskConfig
+from .correlation import correlation_penalty
 from .enums import OrderType, RejectCode, Side
 from .types import (
     AccountState,
@@ -64,9 +65,15 @@ class RiskState:
             "cooldown_count": self.cooldown_count,
         }
 
+    _STATE_KEYS = frozenset({
+        "peak_equity", "kill_switch_engaged", "kill_switch_reason",
+        "day_start_equity", "day_start_ms", "consecutive_losses",
+        "cooldown_until_ms", "symbol_reentry_until", "cooldown_count",
+    })
+
     def load_state(self, d: dict) -> None:
         for k, v in d.items():
-            if hasattr(self, k):
+            if k in self._STATE_KEYS:
                 setattr(self, k, v)
 
 
@@ -195,6 +202,36 @@ class RiskManager:
 
         # 10. position sizing (fixed-fractional, off stop distance, costs folded in)
         size, est_risk = self._size(account.equity, ref_price, stop, market)
+
+        # 10b. correlation-aware sizing penalty
+        open_symbols = [p.symbol for p in account.positions]
+        corr_penalty = correlation_penalty(open_symbols, market.symbol, cfg.data_dir)
+        if corr_penalty < 1.0:
+            size *= corr_penalty
+            size = self._round_down(size, market.step_size)
+            est_risk = size * self._risk_per_unit(ref_price, stop)
+            log.info(
+                "Correlation penalty %.2f applied to %s (open: %s)",
+                corr_penalty, market.symbol, open_symbols,
+            )
+            # Re-check min notional after correlation adjustment
+            notional = size * ref_price
+            if size <= 0 or size < market.min_qty or (
+                market.min_notional and notional < market.min_notional
+            ):
+                return self._reject(
+                    RejectCode.SIZE_BELOW_MIN,
+                    f"correlation-adjusted size {size} / notional {notional:.2f} "
+                    f"below minimum (penalty={corr_penalty:.2f})",
+                    context={"size": size, "notional": notional, "corr_penalty": corr_penalty},
+                )
+            # Re-check risk hard cap after correlation adjustment
+            if est_risk / account.equity > cfg.risk_hard_cap_per_trade:
+                return self._reject(
+                    RejectCode.SIZE_EXCEEDS_MAX,
+                    f"correlation-adjusted risk {est_risk / account.equity:.2%} "
+                    f"exceeds hard cap {cfg.risk_hard_cap_per_trade:.0%}",
+                )
 
         # 11. min/max exchange filters
         notional = size * ref_price

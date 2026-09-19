@@ -5,15 +5,16 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from tradebot.config import BotConfig
 from tradebot.data import ParquetFeed
 from tradebot.enums import Regime, Side
 from tradebot.strategies.base import StrategyContext
 from tradebot.strategies.mean_reversion import MeanReversionStrategy
-from tradebot.strategies.regime import RegimeRouter, detect_regime
+from tradebot.strategies.regime import detect_regime
 from tradebot.strategies.trend import TrendStrategy
+from tradebot.strategies.tsmom import TSMomStrategy
 from tests.conftest import make_ohlcv_df
 
 
@@ -54,10 +55,96 @@ def test_trend_does_not_trade_without_htf_history():
 DATA = Path("data/BTC_USDT_4h.parquet")
 
 
+# ---------------------------------------------------------------------------
+# TSMom new filter tests: volume confirmation & RSI divergence guard
+# ---------------------------------------------------------------------------
+def _make_df(closes: list[float], volume: float | list[float] = 100.0) -> pd.DataFrame:
+    """Build a minimal OHLCV DataFrame. Volume can be a scalar or per-bar list."""
+    tf = 14_400_000  # 4h
+    rows = []
+    prev = closes[0]
+    for i, c in enumerate(closes):
+        o = prev
+        hi = max(o, c) + 0.5
+        lo = min(o, c) - 0.5
+        v = volume[i] if isinstance(volume, list) else volume
+        rows.append([1_577_836_800_000 + i * tf, o, hi, lo, c, v])
+        prev = c
+    df = pd.DataFrame(rows, columns=["open_time", "open", "high", "low", "close", "volume"])
+    df["open_time"] = df["open_time"].astype("int64")
+    df["close_time"] = df["open_time"] + tf
+    return df
+
+
+def _tsmom_ctx(
+    window: pd.DataFrame,
+    position=None,
+    alpha=None,
+    params: dict | None = None,
+) -> StrategyContext:
+    from tradebot.data import row_to_bar
+    from tradebot.strategies.tsmom import TSMomStrategy
+
+    bar_row = window.iloc[-1]
+    bar = row_to_bar(bar_row, "BTC/USDT", "4h")
+    p = params or {**TSMomStrategy.default_params}
+    return StrategyContext(bar, window, window.iloc[0:0], position, bar.close_time_ms, p, alpha)
+
+
+def test_tsmom_volume_low_dampens_confidence():
+    """Low volume reduces confidence below 1.0 but still emits a BUY."""
+    # 250 bars of steady uptrend — trailing return positive
+    closes = [100.0 + 0.5 * i for i in range(250)]
+    # Bars 0-229: normal volume (200), bars 230-248: moderate (100), bar 249: very low (10)
+    # SMA-20 at bar 249 = (19*100 + 10)/20 = 95.5, 0.8*95.5 = 76.4, 10 < 76.4 → dampened
+    vol = [200.0] * 230 + [100.0] * 19 + [10.0]
+    df = _make_df(closes, vol)
+    strat = TSMomStrategy("BTC/USDT", "4h")
+    sig = strat.on_bar(_tsmom_ctx(df))
+    assert sig is not None
+    assert sig.side == Side.BUY
+    assert sig.confidence < 1.0
+
+
+def test_tsmom_volume_normal_full_confidence():
+    """Normal volume keeps confidence at 1.0."""
+    closes = [100.0 + 0.5 * i for i in range(250)]
+    vol = [100.0] * 250
+    df = _make_df(closes, vol)
+    strat = TSMomStrategy("BTC/USDT", "4h")
+    sig = strat.on_bar(_tsmom_ctx(df))
+    assert sig is not None
+    assert sig.side == Side.BUY
+    assert sig.confidence == 1.0
+
+
+def test_tsmom_rsi_divergence_skips_entry():
+    """Price near high but RSI weakening → entry skipped (bearish divergence)."""
+    # 230 bars ramping up (RSI very high), then 20 bars slightly declining
+    # so RSI drops while price stays near the 20-bar high
+    closes = [100.0 + 1.0 * i for i in range(230)] + [
+        330.0 - 0.1 * j for j in range(20)
+    ]
+    df = _make_df(closes)
+    strat = TSMomStrategy("BTC/USDT", "4h")
+    sig = strat.on_bar(_tsmom_ctx(df))
+    assert sig is None, "RSI divergence guard should block entry"
+
+
+def test_tsmom_rsi_no_divergence_allows_entry():
+    """Price near high and RSI also strong → no divergence, entry proceeds."""
+    # 250 bars monotonic uptrend — RSI stays pegged near 100, no divergence
+    closes = [100.0 + 1.0 * i for i in range(250)]
+    df = _make_df(closes)
+    strat = TSMomStrategy("BTC/USDT", "4h")
+    sig = strat.on_bar(_tsmom_ctx(df))
+    assert sig is not None
+    assert sig.side == Side.BUY
+
+
 @pytest.mark.skipif(not DATA.exists(), reason="run scripts.fetch_data first")
 def test_emitted_entry_signals_are_well_formed():
     """Every BUY the trend strategy emits on real data must have a sane stop."""
-    cfg = BotConfig()
     import pandas as pd
 
     df = pd.read_parquet("data/BTC_USDT_4h.parquet")

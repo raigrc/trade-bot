@@ -50,7 +50,7 @@ def main() -> int:
         print(f"\n[BLOCKED] {exc}\n")
         return 3
 
-    secrets = load_secrets()
+    secrets = load_secrets(cfg.mode)
     paper_sim = cfg.mode == Mode.PAPER and cfg.paper_execution == "sim"
     if not paper_sim:
         key, secret = secrets.keys_for(cfg.mode)

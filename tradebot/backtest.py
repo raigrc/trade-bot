@@ -18,7 +18,7 @@ import pandas as pd
 from .clock import SimClock
 from .config import BotConfig, load_config
 from .data import ParquetFeed, iso_to_ms
-from .engine import Engine
+from .engine import Engine, MultiEngine
 from .execution import SimulatedExecution
 from .metrics import Metrics, compute_metrics
 from .portfolio import Portfolio
@@ -120,6 +120,106 @@ def run_backtest(
         trades=portfolio.closed_trades,
         equity_curve=engine.equity_curve,
         rejections=engine.rejections,
+    )
+
+
+@dataclass
+class MultiBacktestResult:
+    """Aggregated result from a multi-symbol backtest."""
+
+    symbols: list[str]
+    strategy: str
+    per_symbol: dict[str, BacktestResult]
+    equity_curve: list[tuple[int, float]]  # portfolio-level, aligned by time
+    total_bars: int
+    combined_rejections: dict[str, int]
+
+
+def run_multi_backtest(
+    config: BotConfig,
+    symbols: list[str],
+    strategy_name: Optional[str] = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    risk_state: Optional[RiskState] = None,
+    params: Optional[dict] = None,
+) -> MultiBacktestResult:
+    """Run a multi-symbol backtest with time-aligned feeds.
+
+    Creates one ``Engine`` per symbol, wraps them in a ``MultiEngine``, and
+    runs all feeds in lockstep by ``close_time_ms``.  Each symbol gets its own
+    independent risk manager, execution layer, and portfolio — the
+    ``MultiEngine`` only orchestrates and aggregates.
+    """
+    strategy_name = strategy_name or config.strategy.name
+    merged_params = {**config.strategy.params, **(params or {})}
+
+    start_ms = (
+        iso_to_ms(start)
+        if start
+        else (iso_to_ms(config.backtest_start) if config.backtest_start else None)
+    )
+    end_ms = (
+        iso_to_ms(end)
+        if end
+        else (iso_to_ms(config.backtest_end) if config.backtest_end else None)
+    )
+
+    engines: dict[str, Engine] = {}
+    feeds: dict[str, ParquetFeed] = {}
+
+    for symbol in symbols:
+        df = _load_parquet(config.data_dir, symbol, config.timeframe)
+        htf_df = _load_parquet(config.data_dir, symbol, config.htf_timeframe)
+        strategy = build_strategy(strategy_name, symbol, config.timeframe, merged_params)
+
+        feeds[symbol] = ParquetFeed(
+            symbol=symbol,
+            timeframe=config.timeframe,
+            df=df,
+            htf_df=htf_df,
+            htf_timeframe=config.htf_timeframe,
+            warmup=strategy.warmup_bars,
+            iter_start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        market = synthetic_market_info(symbol, config.quote_currency)
+        risk = RiskManager(config.risk, RiskState())
+        execution = SimulatedExecution(config.risk, market)
+        portfolio = Portfolio(config.initial_equity, symbol, config.quote_currency)
+        engines[symbol] = Engine(
+            symbol, SimClock(), strategy, risk, execution, portfolio, market
+        )
+
+    multi = MultiEngine(engines)
+    multi.run(feeds)
+
+    per_symbol: dict[str, BacktestResult] = {}
+    for symbol in symbols:
+        e = engines[symbol]
+        metrics = compute_metrics(
+            e.equity_curve,
+            e.portfolio.closed_trades,
+            config.timeframe,
+            config.initial_equity,
+            total_bars=e.bars_processed,
+        )
+        per_symbol[symbol] = BacktestResult(
+            symbol=symbol,
+            strategy=strategy_name,
+            metrics=metrics,
+            trades=e.portfolio.closed_trades,
+            equity_curve=e.equity_curve,
+            rejections=e.rejections,
+        )
+
+    return MultiBacktestResult(
+        symbols=symbols,
+        strategy=strategy_name,
+        per_symbol=per_symbol,
+        equity_curve=multi.equity_curve,
+        total_bars=multi.bars_processed,
+        combined_rejections=multi.rejections,
     )
 
 

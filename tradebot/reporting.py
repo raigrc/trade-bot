@@ -248,10 +248,12 @@ def build_weekly_report(journal: TradeJournal, config: BotConfig, week_start_ms:
     def _r(x: float) -> str:
         return "inf" if x == float("inf") else f"{x:.2f}"
 
+    # Header adapts for single vs multi-symbol
+    symbols_label = ", ".join(config.symbols) if len(config.symbols) > 1 else config.symbols[0]
     md = [
         f"# Weekly reflection — {s.label}",
         f"_{_fmt_date(s.week_start_ms)} → {_fmt_date(s.week_end_ms - 86_400_000)} UTC · "
-        f"{config.symbols[0]} · {config.timeframe} · {config.strategy.name} · mode={config.mode.value}_",
+        f"{symbols_label} · {config.timeframe} · {config.strategy.name} · mode={config.mode.value}_",
         "",
         "## This week",
         f"- Trades: **{s.n_trades}**  ·  Win rate: **{s.win_rate:.0%}**  ·  Profit factor: **{_r(s.profit_factor)}**  "
@@ -286,13 +288,59 @@ def build_weekly_report(journal: TradeJournal, config: BotConfig, week_start_ms:
         *[f"- {line}" for line in s.reflections],
     ]
     if s.trades:
-        md += ["", "## Trades this week",
-               "| exit (UTC) | entry | exit | P&L | ret% | held | exit reason |",
-               "|---|--:|--:|--:|--:|--:|---|"]
-        for t in s.trades:
-            md.append(f"| {datetime.fromtimestamp(t.exit_ms/1000, tz=timezone.utc):%Y-%m-%d %H:%M} | "
-                      f"{t.entry_price:.2f} | {t.exit_price:.2f} | {t.pnl:+.2f} | {t.return_pct:+.2%} | "
-                      f"{t.bars_held} | {t.exit_reason} |")
+        # Determine if trades span multiple symbols
+        symbols_in_trades = sorted({t.symbol for t in s.trades})
+        multi_sym = len(symbols_in_trades) > 1
+
+        # Per-symbol breakdown (only when multiple symbols are active)
+        if multi_sym:
+            md += ["", "## Per-symbol breakdown"]
+            for sym in symbols_in_trades:
+                sym_trades = [t for t in s.trades if t.symbol == sym]
+                sym_wins = [t for t in sym_trades if t.pnl > 0]
+                sym_net = sum(t.pnl for t in sym_trades)
+                sym_fees = sum(t.fees for t in sym_trades)
+                wr = len(sym_wins) / len(sym_trades) if sym_trades else 0.0
+                sym_pf_num = sum(t.pnl for t in sym_wins)
+                sym_pf_den = abs(sum(t.pnl for t in sym_trades if t.pnl < 0))
+                sym_pf = (sym_pf_num / sym_pf_den) if sym_pf_den > 0 else (
+                    float("inf") if sym_pf_num > 0 else 0.0
+                )
+                md.append(f"### {sym}")
+                md.append(
+                    f"- Trades: **{len(sym_trades)}**  ·  Win rate: **{wr:.0%}**  ·  "
+                    f"Profit factor: **{_r(sym_pf)}**  ·  Net P&L: **{sym_net:+.2f} {q}**  ·  "
+                    f"Fees: {sym_fees:.2f}"
+                )
+                if sym_trades:
+                    sym_best = max(sym_trades, key=lambda t: t.return_pct)
+                    sym_worst = min(sym_trades, key=lambda t: t.return_pct)
+                    md.append(
+                        f"- Best: {sym_best.return_pct:+.2%} ({sym_best.exit_reason})  ·  "
+                        f"Worst: {sym_worst.return_pct:+.2%} ({sym_worst.exit_reason})"
+                    )
+
+        # Trades table — add symbol column when multiple symbols are present
+        if multi_sym:
+            md += ["", "## Trades this week",
+                   "| exit (UTC) | symbol | entry | exit | P&L | ret% | held | exit reason |",
+                   "|---|---|--:|--:|--:|--:|--:|---|"]
+            for t in s.trades:
+                md.append(
+                    f"| {datetime.fromtimestamp(t.exit_ms/1000, tz=timezone.utc):%Y-%m-%d %H:%M} | "
+                    f"{t.symbol} | {t.entry_price:.2f} | {t.exit_price:.2f} | {t.pnl:+.2f} | "
+                    f"{t.return_pct:+.2%} | {t.bars_held} | {t.exit_reason} |"
+                )
+        else:
+            md += ["", "## Trades this week",
+                   "| exit (UTC) | entry | exit | P&L | ret% | held | exit reason |",
+                   "|---|--:|--:|--:|--:|--:|---|"]
+            for t in s.trades:
+                md.append(
+                    f"| {datetime.fromtimestamp(t.exit_ms/1000, tz=timezone.utc):%Y-%m-%d %H:%M} | "
+                    f"{t.entry_price:.2f} | {t.exit_price:.2f} | {t.pnl:+.2f} | {t.return_pct:+.2%} | "
+                    f"{t.bars_held} | {t.exit_reason} |"
+                )
     md.append("")
     return s.label, "\n".join(md)
 
